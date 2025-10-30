@@ -49,13 +49,24 @@ docker run -d \
 ## Structure
 ```
 Developer_App_Organizer/
-├── app.py
-├── docker-compose.yml
-├── Dockerfile
-├── nginx.conf
-├── static/
-├── templates/
-└── agent/
+├── app.py                    # Flask management server
+├── docker-compose.yml        # Docker orchestration
+├── Dockerfile               # Container image
+├── nginx.conf               # Reverse proxy config
+├── start-server.sh          # Server startup script
+├── requirements.txt         # Python dependencies
+├── CHANGELOG.md             # Version history
+├── README.md                # This file
+├── static/                  # Web assets
+│   ├── css/
+│   └── js/
+├── templates/               # HTML templates
+├── docs/                    # Documentation
+│   └── PROJECT_OVERVIEW.md  # Detailed project overview
+└── agent/                   # Agent system
+    ├── simple-agent.py
+    ├── simple-install.sh
+    └── requirements.txt
 ```
 
-That’s it. Install the server, download the agent zip, run the agent.
+That's it. Install the server, download the agent zip, run the agent.

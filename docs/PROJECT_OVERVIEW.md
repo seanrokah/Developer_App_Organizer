@@ -28,12 +28,13 @@ This project demonstrates modern DevOps practices by creating a centralized moni
 ## 📁 Project Structure
 
 ```
-Final_Project/
+Developer_App_Organizer/
 ├── 🐳 Docker Environment
 │   ├── app.py                     # Flask application server
 │   ├── docker-compose.yml        # Multi-container deployment
 │   ├── Dockerfile                # Management server image
-│   └── nginx.conf                # Reverse proxy configuration
+│   ├── nginx.conf                # Reverse proxy configuration
+│   └── start-server.sh           # Server startup script
 ├── 🌐 Web Interface
 │   ├── templates/index.html       # Modern responsive UI
 │   ├── static/css/style.css       # Professional styling
@@ -41,12 +42,13 @@ Final_Project/
 ├── 🤖 Agent System
 │   ├── simple-agent.py           # Lightweight monitoring agent
 │   ├── simple-install.sh         # Easy installation script
-│   └── requirements.txt          # Agent dependencies
+│   ├── requirements.txt          # Agent dependencies
+│   └── README.md                 # Agent documentation
 └── 📚 Documentation
     ├── README.md                  # Main documentation
-    ├── PROJECT_OVERVIEW.md       # This file
-    ├── .gitignore                # Git exclusions
-    └── .dockerignore             # Docker exclusions
+    ├── CHANGELOG.md              # Version history
+    └── docs/
+        └── PROJECT_OVERVIEW.md   # This file (detailed overview)
 ```
 
 ## 🚀 Core Features Implementation
