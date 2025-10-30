@@ -11,16 +11,123 @@ import platform
 import subprocess
 import socket
 import uuid
+import logging
+import logging.handlers
 from pathlib import Path
 import requests
 import psutil
 import argparse
 import sys
 
-# Simple logging
-def log(message, level="INFO"):
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] [{level}] {message}")
+# Import optional libraries at top
+try:
+    import docker
+    DOCKER_AVAILABLE = True
+except ImportError:
+    DOCKER_AVAILABLE = False
+    docker = None
+
+try:
+    from kubernetes import client, config
+    KUBERNETES_AVAILABLE = True
+except ImportError:
+    KUBERNETES_AVAILABLE = False
+    client = None
+    config = None
+
+
+def setup_logging():
+    """Setup logging to both console and file"""
+    # Create log directory if it doesn't exist
+    log_dir = Path.home() / '.devops-agent'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / 'agent.log'
+    
+    # Configure logging format
+    log_format = logging.Formatter(
+        '[%(asctime)s] [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(log_format)
+    
+    # File handler with rotation (10MB, keep 5 backups)
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=10 * 1024 * 1024,  # 10MB
+        backupCount=5
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(log_format)
+    
+    # Root logger configuration
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+    
+    return logger
+
+
+# Initialize logger
+logger = setup_logging()
+
+
+def main():
+    """Main entry point"""
+    parser = argparse.ArgumentParser(description='DevOps Organizer Simple Agent')
+    parser.add_argument('--server', help='Management server URL')
+    parser.add_argument('--name', help='Agent name (default: hostname)')
+    parser.add_argument('--interval', type=int, default=30, help='Report interval in seconds')
+    parser.add_argument('--once', action='store_true', help='Run once and exit')
+    parser.add_argument('--interactive', action='store_true', help='Force interactive mode')
+    
+    args = parser.parse_args()
+    
+    # Use interactive mode if no server provided or explicitly requested
+    if not args.server or args.interactive:
+        try:
+            server, agent_name, run_once, interval = get_user_input()
+        except KeyboardInterrupt:
+            print("\n\n❌ Cancelled by user")
+            sys.exit(0)
+    else:
+        server = args.server
+        agent_name = args.name
+        run_once = args.once
+        interval = args.interval
+    
+    print(f"\n🚀 Starting DevOps Organizer Agent...")
+    
+    # Create and run agent
+    try:
+        agent = SimpleAgent(
+            management_server_url=server,
+            agent_name=agent_name
+        )
+        
+        if run_once:
+            print("🔍 Running test connection...")
+            success = agent.run_once()
+            if success:
+                print("✅ Test completed successfully!")
+            else:
+                print("❌ Test failed - check server connection")
+            sys.exit(0 if success else 1)
+        else:
+            print(f"🔄 Starting continuous monitoring (interval: {interval}s)")
+            print("💡 Press Ctrl+C to stop")
+            agent.run_continuous(interval)
+    except KeyboardInterrupt:
+        print("\n\n🛑 Agent stopped by user")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n❌ Agent error: {e}")
+        sys.exit(1)
+
 
 class SimpleAgent:
     """Simplified agent that collects and reports system data"""
@@ -30,7 +137,7 @@ class SimpleAgent:
         self.agent_id = str(uuid.uuid4())
         self.agent_name = agent_name or socket.gethostname()
         
-        log(f"Agent initialized: {self.agent_name} ({self.agent_id})")
+        logger.info(f"Agent initialized: {self.agent_name} ({self.agent_id})")
     
     def register_agent(self):
         """Register agent with management server"""
@@ -58,20 +165,21 @@ class SimpleAgent:
             )
             
             if response.status_code == 200:
-                log("Agent registered successfully")
+                logger.info("Agent registered successfully")
                 return True
             else:
-                log(f"Registration failed: {response.status_code}", "ERROR")
+                logger.error(f"Registration failed: {response.status_code}")
                 return False
                 
         except Exception as e:
-            log(f"Failed to register agent: {e}", "ERROR")
+            logger.error(f"Failed to register agent: {e}")
             return False
     
     def _docker_available(self):
         """Check if Docker is available"""
+        if not DOCKER_AVAILABLE:
+            return False
         try:
-            import docker
             client = docker.from_env()
             client.ping()
             return True
@@ -79,11 +187,16 @@ class SimpleAgent:
             return False
     
     def _kubectl_available(self):
-        """Check if kubectl is available"""
+        """Check if Kubernetes/K3s is available"""
+        if not KUBERNETES_AVAILABLE:
+            return False
         try:
-            result = subprocess.run(['kubectl', 'version', '--client'], 
-                                  capture_output=True, timeout=5)
-            return result.returncode == 0
+            # Try to load kubeconfig and check connection
+            config.load_kube_config()
+            # Try to get API version to verify connection
+            v1 = client.CoreV1Api()
+            v1.get_api_versions()
+            return True
         except Exception:
             return False
     
@@ -110,7 +223,7 @@ class SimpleAgent:
                 'load_average': os.getloadavg() if hasattr(os, 'getloadavg') else [0, 0, 0]
             }
         except Exception as e:
-            log(f"Error collecting system info: {e}", "ERROR")
+            logger.error(f"Error collecting system info: {e}")
             return {}
     
     def collect_projects(self):
@@ -124,7 +237,7 @@ class SimpleAgent:
                 'total_projects': len(projects)
             }
         except Exception as e:
-            log(f"Error collecting projects: {e}", "ERROR")
+            logger.error(f"Error collecting projects: {e}")
             return {'agent_id': self.agent_id, 'projects': [], 'error': str(e)}
     
     def _find_git_projects(self):
@@ -143,7 +256,7 @@ class SimpleAgent:
                         if len(projects) >= 20:  # Limit for POC
                             break
         except Exception as e:
-            log(f"Error finding projects: {e}", "ERROR")
+            logger.error(f"Error finding projects: {e}")
         
         return projects
     
@@ -161,7 +274,7 @@ class SimpleAgent:
                 'git_branch': self._get_git_branch(project_path)
             }
         except Exception as e:
-            log(f"Error analyzing project {project_path}: {e}", "ERROR")
+            logger.error(f"Error analyzing project {project_path}: {e}")
             return None
     
     def _calculate_size(self, path):
@@ -275,7 +388,6 @@ class SimpleAgent:
             if not self._docker_available():
                 return {'agent_id': self.agent_id, 'available': False}
             
-            import docker
             client = docker.from_env()
             
             # Get running containers
@@ -321,7 +433,7 @@ class SimpleAgent:
                 'images': images
             }
         except Exception as e:
-            log(f"Error collecting Docker info: {e}", "ERROR")
+            logger.error(f"Error collecting Docker info: {e}")
             return {'agent_id': self.agent_id, 'available': False, 'error': str(e)}
     
     def collect_ssh_info(self):
@@ -348,7 +460,7 @@ class SimpleAgent:
                 'ssh_keys': keys
             }
         except Exception as e:
-            log(f"Error collecting SSH info: {e}", "ERROR")
+            logger.error(f"Error collecting SSH info: {e}")
             return {'agent_id': self.agent_id, 'ssh_keys': [], 'error': str(e)}
     
     def _determine_key_type(self, key_path):
@@ -374,23 +486,23 @@ class SimpleAgent:
             )
             
             if response.status_code == 200:
-                log(f"Data sent successfully to {endpoint}")
+                logger.info(f"Data sent successfully to {endpoint}")
                 return True
             else:
-                log(f"Failed to send data to {endpoint}: {response.status_code}", "ERROR")
+                logger.error(f"Failed to send data to {endpoint}: {response.status_code}")
                 return False
                 
         except Exception as e:
-            log(f"Error sending data to {endpoint}: {e}", "ERROR")
+            logger.error(f"Error sending data to {endpoint}: {e}")
             return False
     
     def run_once(self):
         """Run a single data collection and send cycle"""
-        log("Starting data collection cycle")
+        logger.info("Starting data collection cycle")
         
         # Register agent
         if not self.register_agent():
-            log("Failed to register agent", "ERROR")
+            logger.error("Failed to register agent")
             return False
         
         # Collect and send system info
@@ -399,39 +511,39 @@ class SimpleAgent:
             self.send_data('system', system_data)
         
         # Collect and send projects
-        log("Collecting projects...")
+        logger.info("Collecting projects...")
         projects_data = self.collect_projects()
         if projects_data:
             self.send_data('projects', projects_data)
         
         # Collect and send Docker info
-        log("Collecting Docker info...")
+        logger.info("Collecting Docker info...")
         docker_data = self.collect_docker_info()
         if docker_data:
             self.send_data('docker', docker_data)
         
         # Collect and send SSH info
-        log("Collecting SSH info...")
+        logger.info("Collecting SSH info...")
         ssh_data = self.collect_ssh_info()
         if ssh_data:
             self.send_data('ssh', ssh_data)
         
-        log("Data collection cycle completed")
+        logger.info("Data collection cycle completed")
         return True
     
     def run_continuous(self, interval=30):
         """Run continuous monitoring"""
-        log(f"Starting continuous monitoring (interval: {interval}s)")
+        logger.info(f"Starting continuous monitoring (interval: {interval}s)")
         
         try:
             while True:
                 self.run_once()
-                log(f"Sleeping for {interval} seconds...")
+                logger.info(f"Sleeping for {interval} seconds...")
                 time.sleep(interval)
         except KeyboardInterrupt:
-            log("Agent stopped by user")
+            logger.info("Agent stopped by user")
         except Exception as e:
-            log(f"Agent error: {e}", "ERROR")
+            logger.error(f"Agent error: {e}")
 
 
 def get_user_input():
@@ -498,59 +610,6 @@ def get_user_input():
         sys.exit(0)
     
     return server, agent_name, run_once, interval
-
-
-def main():
-    """Main entry point"""
-    parser = argparse.ArgumentParser(description='DevOps Organizer Simple Agent')
-    parser.add_argument('--server', help='Management server URL')
-    parser.add_argument('--name', help='Agent name (default: hostname)')
-    parser.add_argument('--interval', type=int, default=30, help='Report interval in seconds')
-    parser.add_argument('--once', action='store_true', help='Run once and exit')
-    parser.add_argument('--interactive', action='store_true', help='Force interactive mode')
-    
-    args = parser.parse_args()
-    
-    # Use interactive mode if no server provided or explicitly requested
-    if not args.server or args.interactive:
-        try:
-            server, agent_name, run_once, interval = get_user_input()
-        except KeyboardInterrupt:
-            print("\n\n❌ Cancelled by user")
-            sys.exit(0)
-    else:
-        server = args.server
-        agent_name = args.name
-        run_once = args.once
-        interval = args.interval
-    
-    print(f"\n🚀 Starting DevOps Organizer Agent...")
-    
-    # Create and run agent
-    try:
-        agent = SimpleAgent(
-            management_server_url=server,
-            agent_name=agent_name
-        )
-        
-        if run_once:
-            print("🔍 Running test connection...")
-            success = agent.run_once()
-            if success:
-                print("✅ Test completed successfully!")
-            else:
-                print("❌ Test failed - check server connection")
-            sys.exit(0 if success else 1)
-        else:
-            print(f"🔄 Starting continuous monitoring (interval: {interval}s)")
-            print("💡 Press Ctrl+C to stop")
-            agent.run_continuous(interval)
-    except KeyboardInterrupt:
-        print("\n\n🛑 Agent stopped by user")
-        sys.exit(0)
-    except Exception as e:
-        print(f"\n❌ Agent error: {e}")
-        sys.exit(1)
 
 
 if __name__ == '__main__':

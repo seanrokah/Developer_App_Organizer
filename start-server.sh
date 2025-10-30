@@ -4,72 +4,86 @@
 # Version: 1.0.0
 # Description: Start the management server with Docker Compose
 
-# DevOps Organizer - Quick Start Script
-# Start the management server with Docker Compose
-
 set -e
 
-# Colors
+# Variables - declared at the beginning
+BUILD=false
+DOCKER_MODEL_AVAILABLE=false
+LOCAL_IP="localhost"
+ENABLE_LLM=false
+
+# Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-print_header() {
-    echo -e "${BLUE}================================================${NC}"
-    echo -e "${BLUE}  DevOps Developer Organizer${NC}"
-    echo -e "${BLUE}================================================${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_info() {
-    echo -e "${BLUE}ℹ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
+# Unified message function
+msg() {
+    local type=$1
+    shift
+    local message="$*"
+    
+    case $type in
+        success)
+            echo -e "${GREEN}✓ $message${NC}"
+            ;;
+        info)
+            echo -e "${BLUE}ℹ $message${NC}"
+            ;;
+        warning)
+            echo -e "${YELLOW}⚠ $message${NC}"
+            ;;
+        error)
+            echo -e "${RED}✗ $message${NC}"
+            ;;
+        header)
+            echo -e "${BLUE}================================================${NC}"
+            echo -e "${BLUE}  $message${NC}"
+            echo -e "${BLUE}================================================${NC}"
+            ;;
+    esac
 }
 
 usage() {
-	echo "Usage: $0 [--build]"
-	echo "  --build    Rebuild Docker images before starting"
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+Start the DevOps Organizer management server with Docker Compose
+
+OPTIONS:
+    --build          Rebuild Docker images before starting
+    -h, --help       Show this help message
+
+EXAMPLES:
+    $0                    # Start server with existing images
+    $0 --build            # Rebuild images and start server
+
+EOF
 }
-
-BUILD=false
-
-# Parse arguments
-for arg in "$@"; do
-	case $arg in
-		--build)
-			BUILD=true
-			;;
-		-h|--help)
-			usage
-			exit 0
-			;;
-		*)
-			;;
-	esac
-done
 
 check_docker() {
     if ! command -v docker &> /dev/null; then
-        echo "❌ Docker is required but not installed"
-        exit 1
+        msg error "Docker is required but not installed"
+        return 1
     fi
     
-    print_success "Docker and Docker Compose found"
+    if ! docker compose version &> /dev/null; then
+        msg error "Docker Compose is required but not available"
+        return 1
+    fi
+    
+    msg success "Docker and Docker Compose found"
+    return 0
 }
 
 check_docker_model() {
-    print_info "Checking for Docker Model availability..."
+    msg info "Checking for Docker Model availability..."
     
     # Check if docker model command is available
     if ! command -v docker model &> /dev/null; then
-        print_warning "Docker Model command not found."
+        msg warning "Docker Model command not found."
         echo
         echo -e "${YELLOW}🤖 AI Assistant features will be disabled.${NC}"
         echo
@@ -80,7 +94,7 @@ check_docker_model() {
         echo
         echo "For more information, visit: https://docs.docker.com/reference/cli/docker/model/"
         echo
-        print_info "Continuing without AI features..."
+        msg info "Continuing without AI features..."
         return 1
     fi
     
@@ -89,93 +103,95 @@ check_docker_model() {
     model_status=$(docker model status 2>/dev/null || echo "")
     
     if [[ "$model_status" == *"Docker Model Runner is running"* ]]; then
-        print_success "Docker Model Runner is running! AI Assistant features will be enabled."
+        msg success "Docker Model Runner is running! AI Assistant features will be enabled."
         return 0
     else
-        print_warning "Docker Model Runner is not running."
+        msg warning "Docker Model Runner is not running."
         echo
         echo -e "${YELLOW}🤖 AI Assistant features will be disabled.${NC}"
         echo
-        echo "Current status: $model_status"
-        echo
+        if [ -n "$model_status" ]; then
+            echo "Current status: $model_status"
+            echo
+        fi
         echo "To enable AI Assistant features (optional):"
         echo "  1. Start Docker Model Runner in Docker Desktop"
         echo "  2. Or run: docker model start (if available)"
         echo "  3. Restart the server with: ${BLUE}./start-server.sh${NC}"
         echo
-        print_info "Continuing without AI features..."
+        msg info "Continuing without AI features..."
         return 1
     fi
 }
 
 build_images() {
-	print_info "Building Docker images..."
-	if $DOCKER_MODEL_AVAILABLE; then
-		# Build all services in llm profile
-		docker compose --profile llm build
-	else
-		# Build only core services
-		docker compose build devops-organizer nginx
-	fi
-	print_success "Images built successfully"
+    msg info "Building Docker images..."
+    
+    local build_result=0
+    if [ "$DOCKER_MODEL_AVAILABLE" = true ]; then
+        # Build all services in llm profile
+        docker compose --profile llm build || build_result=1
+    else
+        # Build only core services
+        docker compose build devops-organizer nginx || build_result=1
+    fi
+    
+    if [ $build_result -ne 0 ]; then
+        msg error "Failed to build Docker images"
+        return 1
+    fi
+    
+    msg success "Images built successfully"
+    return 0
 }
 
 get_local_ip() {
     # Try to get the local IP address
     if command -v ip &> /dev/null; then
-        LOCAL_IP=$(ip route get 8.8.8.8 | sed -n '/src/{s/.*src *\([^ ]*\).*/\1/p;q}')
+        LOCAL_IP=$(ip route get 8.8.8.8 2>/dev/null | sed -n '/src/{s/.*src *\([^ ]*\).*/\1/p;q}' || echo "")
     elif command -v ifconfig &> /dev/null; then
-        LOCAL_IP=$(ifconfig | grep 'inet ' | grep -v '127.0.0.1' | head -1 | awk '{print $2}' | cut -d':' -f2)
+        LOCAL_IP=$(ifconfig | grep 'inet ' | grep -v '127.0.0.1' | head -1 | awk '{print $2}' | cut -d':' -f2 || echo "")
     else
         LOCAL_IP="localhost"
     fi
     
-    if [ -z "$LOCAL_IP" ]; then
+    # Validate IP or default to localhost
+    if [ -z "$LOCAL_IP" ] || [ "$LOCAL_IP" = "127.0.0.1" ]; then
         LOCAL_IP="localhost"
     fi
 }
 
-main() {
-    print_header
+start_services() {
+    msg info "Starting DevOps Organizer management server..."
     
-    check_docker
-    get_local_ip
-    
-    # Check for Docker Model availability
-    DOCKER_MODEL_AVAILABLE=false
-    if check_docker_model; then
-        DOCKER_MODEL_AVAILABLE=true
-        export ENABLE_LLM=true
+    local start_result=0
+    if [ "$DOCKER_MODEL_AVAILABLE" = true ]; then
+        msg info "Starting all services including AI Assistant..."
+        docker compose --profile llm up -d || start_result=1
     else
-        export ENABLE_LLM=false
+        msg info "Starting core services (without AI Assistant)..."
+        docker compose up -d devops-organizer nginx || start_result=1
     fi
     
-	# Optionally rebuild images
-	if $BUILD; then
-		build_images
-	fi
-
-	print_info "Starting DevOps Organizer management server..."
-    
-    # Start the services
-    if $DOCKER_MODEL_AVAILABLE; then
-        print_info "Starting all services including AI Assistant..."
-        docker compose --profile llm up -d
-    else
-        print_info "Starting core services (without AI Assistant)..."
-        docker compose up -d devops-organizer nginx
+    if [ $start_result -ne 0 ]; then
+        msg error "Failed to start services"
+        return 1
     fi
     
     # Wait a moment for services to start
     sleep 3
     
-    print_success "Management server started successfully!"
-    
-    if $DOCKER_MODEL_AVAILABLE; then
-        print_success "🤖 AI Assistant is enabled and available in the dashboard!"
+    msg success "Management server started successfully!"
+    return 0
+}
+
+display_info() {
+    if [ "$DOCKER_MODEL_AVAILABLE" = true ]; then
+        msg success "🤖 AI Assistant is enabled and available in the dashboard!"
     else
-        print_warning "🤖 AI Assistant is disabled (Docker Model not available)"
+        msg warning "🤖 AI Assistant is disabled (Docker Model not available)"
     fi
+    
     echo
     echo -e "${BLUE}🌐 Access Information:${NC}"
     echo "  Web Dashboard: http://localhost:8085"
@@ -199,14 +215,71 @@ main() {
     fi
     echo
     echo -e "${BLUE}🔧 Management Commands:${NC}"
-    echo "  View logs:     docker-compose logs -f"
-    echo "  Stop server:   docker-compose down"
-    echo "  Restart:       docker-compose restart"
+    echo "  View logs:     docker compose logs -f"
+    echo "  Stop server:   docker compose down"
+    echo "  Restart:       docker compose restart"
     echo
     echo -e "${YELLOW}Next Steps:${NC}"
     echo "  1. Open http://localhost:8085 in your browser"
     echo "  2. Install agents on machines you want to monitor"
     echo "  3. Watch your infrastructure come to life!"
+}
+
+main() {
+    # Parse command line arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --build)
+                BUILD=true
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                msg error "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+        esac
+    done
+    
+    msg header "DevOps Developer Organizer"
+    
+    # Check Docker availability
+    if ! check_docker; then
+        exit 1
+    fi
+    
+    # Get local IP address
+    get_local_ip
+    
+    # Check for Docker Model availability
+    if check_docker_model; then
+        DOCKER_MODEL_AVAILABLE=true
+        ENABLE_LLM=true
+        export ENABLE_LLM
+    else
+        DOCKER_MODEL_AVAILABLE=false
+        ENABLE_LLM=false
+        export ENABLE_LLM
+    fi
+    
+    # Optionally rebuild images
+    if [ "$BUILD" = true ]; then
+        if ! build_images; then
+            exit 1
+        fi
+    fi
+    
+    # Start services
+    if ! start_services; then
+        exit 1
+    fi
+    
+    # Display information
+    display_info
 }
 
 main "$@"

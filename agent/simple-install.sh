@@ -5,36 +5,48 @@
 
 set -e
 
-# Colors
+# Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-print_header() {
-    echo -e "${BLUE}================================================${NC}"
-    echo -e "${BLUE}  DevOps Organizer Simple Agent Setup${NC}"
-    echo -e "${BLUE}================================================${NC}"
+# Variables - declared at the beginning
+INSTALL_DIR="$HOME/.devops-agent"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
+AGENT_FILE="$SCRIPT_DIR/simple-agent.py"
+INSTALL_SUCCESS=false
+
+# Unified message function
+msg() {
+    local type=$1
+    shift
+    local message="$*"
+    
+    case $type in
+        success)
+            echo -e "${GREEN}✓ $message${NC}"
+            ;;
+        info)
+            echo -e "${BLUE}ℹ $message${NC}"
+            ;;
+        warning)
+            echo -e "${YELLOW}⚠ $message${NC}"
+            ;;
+        error)
+            echo -e "${RED}✗ $message${NC}"
+            ;;
+        header)
+            echo -e "${BLUE}================================================${NC}"
+            echo -e "${BLUE}  $message${NC}"
+            echo -e "${BLUE}================================================${NC}"
+            ;;
+    esac
 }
 
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_info() {
-    echo -e "${BLUE}ℹ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ $1${NC}"
-}
-
-show_help() {
+usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
@@ -42,7 +54,7 @@ Simple setup for DevOps Organizer Agent
 
 OPTIONS:
     --install-dir DIR   Installation directory (default: ~/.devops-agent)
-    --help              Show this help message
+    -h, --help          Show this help message
 
 EXAMPLES:
     $0                                    # Install to default location
@@ -52,75 +64,90 @@ EOF
 }
 
 check_requirements() {
-    print_info "Checking requirements..."
+    msg info "Checking requirements..."
     
     # Check Python 3
     if ! command -v python3 &> /dev/null; then
-        print_error "Python 3 is required but not installed"
-        exit 1
+        msg error "Python 3 is required but not installed"
+        return 1
     fi
     
     # Check pip
     if ! command -v pip3 &> /dev/null; then
-        print_error "pip3 is required but not installed"
-        exit 1
+        msg error "pip3 is required but not installed"
+        return 1
     fi
     
     python_version=$(python3 --version)
-    print_success "Found $python_version"
-    print_success "Requirements satisfied"
+    msg success "Found $python_version"
+    msg success "Requirements satisfied"
+    return 0
 }
 
 install_dependencies() {
-    print_info "Installing Python dependencies..."
+    msg info "Installing Python dependencies..."
     
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ ! -f "$REQUIREMENTS_FILE" ]; then
+        msg error "requirements.txt not found in $SCRIPT_DIR"
+        return 1
+    fi
     
-    if [ ! -f "$SCRIPT_DIR/requirements.txt" ]; then
-        print_error "requirements.txt not found in $SCRIPT_DIR"
-        exit 1
+    # Check for virtual environment
+    local venv_active=false
+    if [[ -n "$VIRTUAL_ENV" ]]; then
+        venv_active=true
+        msg info "Virtual environment detected: $VIRTUAL_ENV"
     fi
     
     # Install dependencies
-    if [[ -n "$VIRTUAL_ENV" ]]; then
-        print_info "Virtual environment detected: $VIRTUAL_ENV"
-        pip3 install -r "$SCRIPT_DIR/requirements.txt"
+    local install_result=0
+    if [ "$venv_active" = true ]; then
+        pip3 install -r "$REQUIREMENTS_FILE" || install_result=1
     else
-        print_info "Installing with --user flag"
-        pip3 install --user -r "$SCRIPT_DIR/requirements.txt"
+        msg info "Installing with --user flag"
+        pip3 install --user -r "$REQUIREMENTS_FILE" || install_result=1
     fi
     
-    print_success "Dependencies installed"
+    if [ $install_result -ne 0 ]; then
+        msg error "Failed to install dependencies"
+        msg warning "Attempting forced installation..."
+        pip3 install --user --force-reinstall -r "$REQUIREMENTS_FILE" || {
+            msg error "Dependency installation failed completely"
+            return 1
+        }
+    fi
+    
+    msg success "Dependencies installed"
+    return 0
 }
 
 setup_agent() {
-    print_info "Setting up agent files..."
-    
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    msg info "Setting up agent files..."
     
     # Create installation directory
     mkdir -p "$INSTALL_DIR"
     
     # Copy agent files
-    if [ -f "$SCRIPT_DIR/simple-agent.py" ]; then
-        cp "$SCRIPT_DIR/simple-agent.py" "$INSTALL_DIR/"
-        chmod +x "$INSTALL_DIR/simple-agent.py"
-        print_success "Copied simple-agent.py"
-    else
-        print_error "simple-agent.py not found"
-        exit 1
+    if [ ! -f "$AGENT_FILE" ]; then
+        msg error "simple-agent.py not found"
+        return 1
     fi
     
-    if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
-        cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/"
-        print_success "Copied requirements.txt"
+    cp "$AGENT_FILE" "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR/simple-agent.py"
+    msg success "Copied simple-agent.py"
+    
+    if [ -f "$REQUIREMENTS_FILE" ]; then
+        cp "$REQUIREMENTS_FILE" "$INSTALL_DIR/"
+        msg success "Copied requirements.txt"
     fi
     
-    print_success "Agent files set up in $INSTALL_DIR"
+    msg success "Agent files set up in $INSTALL_DIR"
+    return 0
 }
 
 show_usage_instructions() {
-    print_success "Setup completed!"
+    msg success "Setup completed!"
     echo
     echo -e "${BLUE}Agent Location:${NC}"
     echo "  $INSTALL_DIR/simple-agent.py"
@@ -153,10 +180,10 @@ show_usage_instructions() {
 
 prompt_run_now() {
     echo
-    print_info "Configure continuous monitoring"
+    msg info "Configure continuous monitoring"
     read -r -p "Management server URL (e.g., http://192.168.1.100:8085): " SERVER_URL
     if [ -z "$SERVER_URL" ]; then
-        print_warning "No server URL provided. Skipping run."
+        msg warning "No server URL provided. Skipping run."
         return 0
     fi
 
@@ -177,21 +204,18 @@ prompt_run_now() {
     case "$RUN_NOW" in
         [yY]|[yY][eE][sS])
             echo
-            print_info "Starting agent (press Ctrl+C to stop)..."
+            msg info "Starting agent (press Ctrl+C to stop)..."
             eval "$CMD"
             ;;
         *)
             echo
-            print_info "Not running now. Use this command when ready:"
+            msg info "Not running now. Use this command when ready:"
             echo "$CMD"
             ;;
     esac
 }
 
 main() {
-    # Default values
-    INSTALL_DIR="$HOME/.devops-agent"
-    
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -199,25 +223,44 @@ main() {
                 INSTALL_DIR="$2"
                 shift 2
                 ;;
-            --help)
-                show_help
+            -h|--help)
+                usage
                 exit 0
                 ;;
             *)
-                print_error "Unknown option: $1"
-                show_help
+                msg error "Unknown option: $1"
+                usage
                 exit 1
                 ;;
         esac
     done
     
-    print_header
+    msg header "DevOps Organizer Simple Agent Setup"
     
-    check_requirements
-    install_dependencies
-    setup_agent
+    # Check requirements and handle errors
+    if ! check_requirements; then
+        exit 1
+    fi
+    
+    # Install dependencies and handle errors
+    if ! install_dependencies; then
+        msg error "Installation failed at dependency step"
+        exit 1
+    fi
+    
+    # Setup agent and handle errors
+    if ! setup_agent; then
+        msg error "Installation failed at setup step"
+        exit 1
+    fi
+    
+    # Show instructions
     show_usage_instructions
+    
+    # Prompt for running
     prompt_run_now
+    
+    INSTALL_SUCCESS=true
 }
 
 main "$@"
