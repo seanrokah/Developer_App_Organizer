@@ -9,7 +9,9 @@ import json
 import subprocess
 import platform
 from pathlib import Path
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_file
+import io
+import zipfile
 import docker
 from kubernetes import client, config
 from datetime import datetime, timedelta
@@ -848,6 +850,35 @@ ssh_manager = SSHKeyManager()
 def index():
     """Main page"""
     return render_template('index.html')
+
+
+@app.route('/download/agent.zip')
+def download_agent_zip():
+    """Serve the agent folder as a zip download"""
+    try:
+        base_dir = Path(__file__).resolve().parent
+        agent_dir = base_dir / 'agent'
+        if not agent_dir.exists() or not agent_dir.is_dir():
+            return jsonify({'status': 'error', 'message': 'Agent directory not found'}), 404
+
+        memory_file = io.BytesIO()
+        with zipfile.ZipFile(memory_file, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+            for file_path in agent_dir.rglob('*'):
+                if file_path.is_file():
+                    # Write file with relative path inside zip
+                    arcname = file_path.relative_to(base_dir)
+                    zf.write(file_path, arcname.as_posix())
+
+        memory_file.seek(0)
+        filename = f"agent-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
+        return send_file(
+            memory_file,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Failed to create agent zip: {str(e)}'}), 500
 
 
 @app.route('/api/projects')

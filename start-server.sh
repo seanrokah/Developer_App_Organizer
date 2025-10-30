@@ -33,6 +33,28 @@ print_warning() {
     echo -e "${YELLOW}⚠ $1${NC}"
 }
 
+usage() {
+	echo "Usage: $0 [--build]"
+	echo "  --build    Rebuild Docker images before starting"
+}
+
+BUILD=false
+
+# Parse arguments
+for arg in "$@"; do
+	case $arg in
+		--build)
+			BUILD=true
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			;;
+	esac
+done
+
 check_docker() {
     if ! command -v docker &> /dev/null; then
         echo "❌ Docker is required but not installed"
@@ -86,6 +108,18 @@ check_docker_model() {
     fi
 }
 
+build_images() {
+	print_info "Building Docker images..."
+	if $DOCKER_MODEL_AVAILABLE; then
+		# Build all services in llm profile
+		docker compose --profile llm build
+	else
+		# Build only core services
+		docker compose build devops-organizer nginx
+	fi
+	print_success "Images built successfully"
+}
+
 get_local_ip() {
     # Try to get the local IP address
     if command -v ip &> /dev/null; then
@@ -116,7 +150,12 @@ main() {
         export ENABLE_LLM=false
     fi
     
-    print_info "Starting DevOps Organizer management server..."
+	# Optionally rebuild images
+	if $BUILD; then
+		build_images
+	fi
+
+	print_info "Starting DevOps Organizer management server..."
     
     # Start the services
     if $DOCKER_MODEL_AVAILABLE; then

@@ -91,34 +91,38 @@
                 <div class="agent-instructions" id="agentInstructions" style="display: none;">
                     <div class="instructions-card">
                         <h3><i class="fas fa-download"></i> Install Agent on New Machine</h3>
-                        <p>To add a new machine to monitoring, install the agent using one of these methods:</p>
-                        
+                        <p>Fastest way to add a new machine:</p>
+
                         <div class="instruction-method">
-                            <h4>Method 1: Automatic Installation</h4>
-                            <div class="code-block">
-                                <code>curl -fsSL http://[MANAGEMENT_SERVER]/agent/install.sh | sudo bash -s -- --server http://[MANAGEMENT_SERVER]</code>
-                                <button class="copy-btn" onclick="copyInstallCommand()">
-                                    <i class="fas fa-copy"></i> Copy
-                                </button>
-                            </div>
+                            <a class="btn btn-primary" href="/download/agent.zip">
+                                <i class="fas fa-file-archive"></i> Download Agent ZIP
+                            </a>
                         </div>
-                        
+
                         <div class="instruction-method">
-                            <h4>Method 2: Manual Installation</h4>
+                            <h4>Quick Install</h4>
                             <ol>
-                                <li>Download agent files from the management server</li>
-                                <li>Run: <code>sudo ./install-agent.sh --server http://[MANAGEMENT_SERVER]</code></li>
-                                <li>Agent will automatically start and register</li>
+                                <li>Copy the ZIP to the target machine and unzip it</li>
+                                <li>Run installer:
+                                    <div class="code-block">
+                                        <code>cd agent && ./simple-install.sh</code>
+                                    </div>
+                                </li>
+                                <li>Start the agent (replace host):
+                                    <div class="code-block">
+                                        <code>python3 ~/.devops-agent/simple-agent.py --server http://[MANAGEMENT_SERVER]:8085 --name "my-machine"</code>
+                                    </div>
+                                </li>
                             </ol>
                         </div>
-                        
+
                         <div class="instruction-method">
-                            <h4>Method 3: Docker Container</h4>
+                            <h4>Optional: Docker</h4>
                             <div class="code-block">
                                 <code>docker run -d --name devops-agent \<br>
   -v /var/run/docker.sock:/var/run/docker.sock:ro \<br>
   -v $HOME:/host_home:ro \<br>
-  -e MANAGEMENT_SERVER=http://[MANAGEMENT_SERVER] \<br>
+  -e MANAGEMENT_SERVER=http://[MANAGEMENT_SERVER]:8085 \<br>
   devops-organizer-agent:latest</code>
                                 <button class="copy-btn" onclick="copyDockerCommand()">
                                     <i class="fas fa-copy"></i> Copy

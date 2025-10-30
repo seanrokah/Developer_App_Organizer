@@ -151,6 +151,43 @@ show_usage_instructions() {
     echo "  (Press Ctrl+C to stop)"
 }
 
+prompt_run_now() {
+    echo
+    print_info "Configure continuous monitoring"
+    read -r -p "Management server URL (e.g., http://192.168.1.100:8085): " SERVER_URL
+    if [ -z "$SERVER_URL" ]; then
+        print_warning "No server URL provided. Skipping run."
+        return 0
+    fi
+
+    read -r -p "Agent name (optional, press Enter to use hostname): " AGENT_NAME
+    read -r -p "Report interval seconds (optional, default 30): " INTERVAL
+
+    CMD="python3 $INSTALL_DIR/simple-agent.py --server $SERVER_URL"
+    if [ -n "$AGENT_NAME" ]; then
+        CMD="$CMD --name \"$AGENT_NAME\""
+    fi
+    if [ -n "$INTERVAL" ]; then
+        CMD="$CMD --interval $INTERVAL"
+    fi
+
+    echo
+    echo -e "${BLUE}Command:${NC} $CMD"
+    read -r -p "Run now continuously? (y/N): " RUN_NOW
+    case "$RUN_NOW" in
+        [yY]|[yY][eE][sS])
+            echo
+            print_info "Starting agent (press Ctrl+C to stop)..."
+            eval "$CMD"
+            ;;
+        *)
+            echo
+            print_info "Not running now. Use this command when ready:"
+            echo "$CMD"
+            ;;
+    esac
+}
+
 main() {
     # Default values
     INSTALL_DIR="$HOME/.devops-agent"
@@ -180,6 +217,7 @@ main() {
     install_dependencies
     setup_agent
     show_usage_instructions
+    prompt_run_now
 }
 
 main "$@"
