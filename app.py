@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """
+Author: Sean Rokah & Nehoray Kanizo
+Date: 2025-10-30
+Version: 1.3.0
 DevOps Developer Organizer
 A comprehensive tool for managing local projects, Docker containers, K3s clusters, and SSH keys.
 """
