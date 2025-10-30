@@ -1,7 +1,7 @@
 #!/bin/bash
 # Author: Sean Rokah
-# Date: 2025-09-16
-# Version: 1.0.0
+# Date: 2025-10-30
+# Version: 1.3.1
 # Description: Start the management server with Docker Compose
 
 set -e
