@@ -16,6 +16,7 @@ Open `http://localhost:8085`.
 - Install and run:
 ```bash
 cd agent && ./simple-install.sh
+Create a virtual env (Python3 -m venv .venv) And source it (Source .venv/bin/activate)
 python3 ~/.devops-agent/simple-agent.py --server http://[SERVER]:8085 --name "my-machine"
 ```
 
